@@ -1,59 +1,68 @@
-import tensorflow as tf
+import streamlit as st
 import numpy as np
 from PIL import Image, ImageOps
-import streamlit as st
 import os
+import tflite_runtime.interpreter as tflite
 
+# --------------------------
+# Load TFLite model
+# --------------------------
+MODEL_PATH = "mnist_model.tflite"
 
-# Load the model from the correct path
-# The '..' navigates up one directory to find the 'model' folder
-try:
-    from tensorflow.keras.models import load_model
-
-    model = load_model("mnist_model.h5")
-
-except Exception as e:
-    st.error(f"Error loading the model. Make sure 'mnist_model.h5' is in the 'model' directory at the root level of your project. Error: {e}")
+if not os.path.exists(MODEL_PATH):
+    st.error(f"Model file '{MODEL_PATH}' not found. Please make sure it is in the project root.")
     st.stop()
 
+# Initialize TFLite interpreter
+interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
 
-def predictImage(image):
+# Get input and output details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+
+def predict_image(image):
     """
-    Preprocesses the input image and makes a prediction using the loaded model.
+    Preprocess the uploaded image and predict using the TFLite model.
     """
-    # Convert the input image to grayscale
+    # Convert to grayscale
     image = ImageOps.grayscale(image)
 
-    # Convert to MNIST size (28x28 pixels)
+    # Resize to MNIST 28x28
     img = image.resize((28, 28))
 
-    # Normalize pixel values to be between 0 and 1
-    img = np.array(img, dtype="float32") / 255.0
+    # Normalize pixel values
+    img = np.array(img, dtype=np.float32) / 255.0
 
-    # Reshape the image to fit the model's input shape (1, 28, 28, 1)
+    # Reshape for the model: (1, 28, 28, 1)
     img = img.reshape(1, 28, 28, 1)
 
-    # Predict the number
-    pred = model.predict(img)
-    return np.argmax(pred[0])
+    # Set the tensor
+    interpreter.set_tensor(input_details[0]['index'], img)
 
+    # Run inference
+    interpreter.invoke()
+
+    # Get prediction
+    prediction = interpreter.get_tensor(output_details[0]['index'])
+    predicted_class = np.argmax(prediction[0])
+
+    return predicted_class
+
+
+# --------------------------
 # Streamlit UI
-st.title("Handwritten Digit Recognition")
-st.write("Upload an image of a single digit to see the prediction.")
+# --------------------------
+st.title("🖊️ Handwritten Digit Recognition (MNIST)")
+st.write("Upload an image of a handwritten digit (0–9) and I’ll predict the number!")
 
-# File uploader with the correct function name
-file_ = st.file_uploader("Choose an image", type=["png", "jpg", "jpeg"])
+file_ = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
 
 if file_ is not None:
-    # Open the image
     image = Image.open(file_)
     st.image(image, caption="Uploaded Image", width=150)
 
-    # Predict button
-    if st.button("Predict Now"):
-        # Make sure the user has uploaded a file before predicting
-        if file_ is not None:
-            result = predictImage(image=image)
-            st.header("Predicted Digit: " + str(result))
-        else:
-            st.warning("Please upload an image first.")
+    if st.button("🔍 Predict"):
+        result = predict_image(image)
+        st.success(f"Predicted Digit: {result}")
